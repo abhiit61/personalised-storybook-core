@@ -1,17 +1,44 @@
 package com.fusion.psb.service;
 
 import com.fusion.psb.dto.StorybookRequest;
-import com.itextpdf.text.*;
+import com.itextpdf.text.Document;
+import com.itextpdf.text.Image;
+import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.PdfWriter;
+import org.slf4j.Logger;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayOutputStream;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class StorybookService {
 
-  public byte[] generateStorybook(StorybookRequest request) throws Exception {
+  private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(StorybookService.class);
 
+//  @Value("${gemini.api.url}")
+//  private String geminiApiUrl;
+//  @Value("${gemini.api.key}")
+//  private String geminiApiKey;
+  private final RestTemplate restTemplate;
+  private final ChatClient chatClient;
+
+  @Autowired
+  public StorybookService(RestTemplate restTemplate, ChatClient chatClient) {
+    this.restTemplate = restTemplate;
+    this.chatClient = chatClient;
+  }
+
+  public byte[] generateStorybook(StorybookRequest request) throws Exception {
     // Create prompt for AI
     String prompt = String.format(
         "Create a personalized storybook for a %d-year-old %s named %s with body tone %s. " +
@@ -23,29 +50,56 @@ public class StorybookService {
     );
 
     // Call AI service (placeholder)
-    String storyContent = callAIService(prompt);
+    String storyContent = callGeminiApi(prompt);
     String imageUrl = "https://example.com/image.jpg"; // Placeholder for AI-generated image URL
 
     // Generate PDF
     return createPDF(request.getName(), storyContent, imageUrl);
   }
 
-  private String callAIService(String prompt) {
-    // Placeholder for AI service integration
-    return "Once upon a time, in a magical land...";
+  private String callGeminiApi(String prompt) {
+    try {
+      // Make a POST request to the Gemini API
+//      Map<String, Object> requestBody = new HashMap<>();
+//      requestBody.put("contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))));
+//      return restTemplate.postForObject(
+//          geminiApiUrl,
+//          requestBody,
+//          String.class
+//      );
+      return chatClient.prompt()
+          .user(prompt)
+          .call()
+          .content();
+    } catch (HttpClientErrorException | HttpServerErrorException | ResourceAccessException e) {
+      // Handle 4xx errors (e.g., invalid credentials, bad request)
+      LOGGER.error("Error : ", e);
+      throw new RuntimeException("Error: "+ e.getMessage());
+    } catch (Exception e) {
+      LOGGER.error("Error : ", e);
+      throw new RuntimeException("Error: "+ e.getMessage());
+    }
   }
 
-  private byte[] createPDF(String name, String content, String imageUrl) throws Exception {
+  private byte[] createPDF(String name, String content, String imageUrl) {
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     Document document = new Document();
-    PdfWriter.getInstance(document, outputStream);
-
-    document.open();
-    document.add(new Paragraph("Personalized Storybook for " + name));
-    document.add(new Paragraph(content));
-    document.add(Image.getInstance(imageUrl)); // Add image (URL must be accessible)
-    document.close();
-
+    try {
+      PdfWriter.getInstance(document, outputStream);
+      document.open();
+      document.add(new Paragraph("Personalized Storybook for " + name));
+      document.add(new Paragraph(content));
+      // Uncomment the following line if the image URL is accessible and valid
+      // document.add(Image.getInstance(imageUrl));
+    } catch (Exception e) {
+      LOGGER.error("Error while creating PDF: ", e);
+      throw new RuntimeException("Failed to generate the PDF. Please try again later.");
+    } finally {
+      if (document.isOpen()) {
+        document.close();
+      }
+    }
     return outputStream.toByteArray();
   }
+
 }

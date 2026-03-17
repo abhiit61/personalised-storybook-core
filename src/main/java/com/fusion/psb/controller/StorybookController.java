@@ -16,16 +16,10 @@ public class StorybookController {
   private StorybookService storybookService;
 
   @PostMapping("/generate")
-  public ResponseEntity<byte[]> generateStorybook(@RequestBody StorybookRequest request) {
-    try {
+  public ResponseEntity<byte[]> generateStorybook(@RequestBody StorybookRequest request) throws Exception {
       byte[] pdfData = storybookService.generateStorybook(request);
-
       HttpHeaders headers = new HttpHeaders();
       headers.add("Content-Type", "application/pdf");
-
       return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
-    } catch (Exception e) {
-      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
-    }
   }
 }
