@@ -30,6 +30,7 @@ public class StoryBookAppConfig implements WebMvcConfigurer {
     registry.addMapping("/**") // Allow all endpoints
         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // Allowed HTTP methods
         .allowedOriginPatterns("http://localhost:4200")
+        .allowedOrigins("https://magictale.netlify.app")
         .allowedHeaders("*") // Allow all headers
         .allowCredentials(true); // Allow cookies
   }
