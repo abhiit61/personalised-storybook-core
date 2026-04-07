@@ -45,7 +45,7 @@ public class StorybookService {
     String prompt = String.format(
         "Create a personalized storybook for a %d-year-old %s named %s with body tone %s. " +
             "The story is set in %s during %s. The theme is %s, mood is %s, and the companion is %s. " +
-            "Include moral attributes: %s.",
+            "Include moral attributes: %s. Keep story for 2 pages only",
         request.getAge(), request.getGender(), request.getName(), request.getBodyTone(),
         request.getLocation(), request.getEvent(), request.getTheme(), request.getMood(),
         request.getCompanion(), request.getMoralAttributes()
