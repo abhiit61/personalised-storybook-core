@@ -44,7 +44,7 @@ public class StorybookController {
       HttpServletRequest httpRequest) {
 
     String remoteAddr = httpRequest.getRemoteAddr();
-    if (!allowedIp.equals(remoteAddr)) {
+    if (!"all".equalsIgnoreCase(allowedIp) && !allowedIp.equals(remoteAddr)) {
       return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied: IP "+remoteAddr+" not allowed");
     }
 
