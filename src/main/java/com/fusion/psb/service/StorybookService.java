@@ -2,6 +2,8 @@ package com.fusion.psb.service;
 
 import com.fusion.psb.config.StorybookConstants;
 import com.fusion.psb.dto.StorybookRequest;
+import com.fusion.psb.entity.StorybookAuditLog;
+import com.fusion.psb.repository.StorybookAuditLogRepository;
 import com.itextpdf.text.Document;
 import com.itextpdf.text.Image;
 import com.itextpdf.text.Paragraph;
@@ -17,6 +19,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayOutputStream;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -27,17 +30,16 @@ public class StorybookService {
 
   private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(StorybookService.class);
 
-//  @Value("${gemini.api.url}")
-//  private String geminiApiUrl;
-//  @Value("${gemini.api.key}")
-//  private String geminiApiKey;
   private final RestTemplate restTemplate;
   private final ChatClient chatClient;
+  private final StorybookAuditLogRepository auditLogRepository;
 
   @Autowired
-  public StorybookService(RestTemplate restTemplate, ChatClient chatClient) {
+  public StorybookService(RestTemplate restTemplate, ChatClient chatClient,
+      StorybookAuditLogRepository auditLogRepository) {
     this.restTemplate = restTemplate;
     this.chatClient = chatClient;
+    this.auditLogRepository = auditLogRepository;
   }
 
   public byte[] generateStorybook(StorybookRequest request) throws Exception {
@@ -55,13 +57,40 @@ public class StorybookService {
         request.getCompanion(), request.getMoralAttributes()
     );
 
-    // Call AI service (placeholder)
-    String storyContent = callGeminiApi(userPrompt, sysPromp);
-//    String storyContent = StorybookConstants.HARCODED_STORY_CONTENT;
-    String imageUrl = "https://example.com/image.jpg"; // Placeholder for AI-generated image URL
+    StorybookAuditLog auditLog = buildAuditLog(request);
 
-    // Generate PDF
+    String storyContent;
+    try {
+      storyContent = callGeminiApi(userPrompt, sysPromp);
+      auditLog.setAiResponse(storyContent);
+      auditLog.setSuccess(true);
+    } catch (Exception e) {
+      auditLog.setSuccess(false);
+      auditLog.setErrorMessage(e.getMessage());
+      auditLogRepository.save(auditLog);
+      throw e;
+    }
+
+    auditLogRepository.save(auditLog);
+
+    String imageUrl = "https://example.com/image.jpg"; // Placeholder for AI-generated image URL
     return createPDF(request.getName(), storyContent, imageUrl);
+  }
+
+  private StorybookAuditLog buildAuditLog(StorybookRequest request) {
+    StorybookAuditLog log = new StorybookAuditLog();
+    log.setName(request.getName());
+    log.setGender(request.getGender());
+    log.setAge(request.getAge());
+    log.setBodyTone(request.getBodyTone());
+    log.setLocation(request.getLocation());
+    log.setEvent(request.getEvent());
+    log.setTheme(request.getTheme());
+    log.setMood(request.getMood());
+    log.setCompanion(request.getCompanion());
+    log.setMoralAttributes(request.getMoralAttributes());
+    log.setRequestTimestamp(LocalDateTime.now());
+    return log;
   }
 
   private String callGeminiApi(String userPrompt, String systemPromp) {
