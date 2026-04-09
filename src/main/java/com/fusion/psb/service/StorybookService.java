@@ -41,18 +41,22 @@ public class StorybookService {
   }
 
   public byte[] generateStorybook(StorybookRequest request) throws Exception {
-    // Create prompt for AI
-    String prompt = String.format(
+    // Create userPrompt for AI
+    String sysPromp = "You are a story creator who creates story as per the inputs given by user. Generate story for two pages. Short ones. "
+        + "Use low level vocabulary so person in india can understand. Add images in form of text, so in next iteration we can use it to generate image."
+        + "Generate content based on the age.";
+
+    String userPrompt = String.format(
         "Create a personalized storybook for a %d-year-old %s named %s with body tone %s. " +
             "The story is set in %s during %s. The theme is %s, mood is %s, and the companion is %s. " +
-            "Include moral attributes: %s. Keep story for 2 pages only",
+            "Include moral attributes: %s. ",
         request.getAge(), request.getGender(), request.getName(), request.getBodyTone(),
         request.getLocation(), request.getEvent(), request.getTheme(), request.getMood(),
         request.getCompanion(), request.getMoralAttributes()
     );
 
     // Call AI service (placeholder)
-    String storyContent = callGeminiApi(prompt);
+    String storyContent = callGeminiApi(userPrompt, sysPromp);
 //    String storyContent = StorybookConstants.HARCODED_STORY_CONTENT;
     String imageUrl = "https://example.com/image.jpg"; // Placeholder for AI-generated image URL
 
@@ -60,10 +64,11 @@ public class StorybookService {
     return createPDF(request.getName(), storyContent, imageUrl);
   }
 
-  private String callGeminiApi(String prompt) {
+  private String callGeminiApi(String userPrompt, String systemPromp) {
     try {
       return chatClient.prompt()
-          .user(prompt)
+          .system(systemPromp)
+          .user(userPrompt)
           .call()
           .content();
     } catch (HttpClientErrorException | HttpServerErrorException | ResourceAccessException e) {
