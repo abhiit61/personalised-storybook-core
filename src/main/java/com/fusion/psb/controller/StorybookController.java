@@ -27,6 +27,9 @@ public class StorybookController {
   @Value("${admin.audit.password}")
   private String adminPassword;
 
+  @Value("${admin.audit.allowed-ip}")
+  private String allowedIp;
+
   @PostMapping("/generate")
   public ResponseEntity<byte[]> generateStorybook(@RequestBody StorybookRequest request) throws Exception {
       byte[] pdfData = storybookService.generateStorybook(request);
@@ -41,8 +44,8 @@ public class StorybookController {
       HttpServletRequest httpRequest) {
 
     String remoteAddr = httpRequest.getRemoteAddr();
-    if (!"127.0.0.1".equals(remoteAddr) && !"0:0:0:0:0:0:0:1".equals(remoteAddr)) {
-      return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied: localhost only");
+    if (!allowedIp.equals(remoteAddr)) {
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied: IP not allowed");
     }
 
     if (!adminPassword.equals(password)) {
