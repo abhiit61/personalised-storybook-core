@@ -5,20 +5,39 @@ import com.itextpdf.text.Chunk;
 import com.itextpdf.text.Document;
 import com.itextpdf.text.Element;
 import com.itextpdf.text.Font;
+import com.itextpdf.text.Image;
 import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.BaseFont;
 import com.itextpdf.text.pdf.PdfWriter;
 import com.itextpdf.text.pdf.draw.LineSeparator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class PdfGeneratorService {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PdfGeneratorService.class);
+
+  // Matches: [IMAGE: description]
+  private static final Pattern IMAGE_TAG_PATTERN =
+      Pattern.compile("^\\[IMAGE:\\s*(.+?)\\s*\\]$", Pattern.CASE_INSENSITIVE);
+
+  // Matches: **(Page N: Illustration - description)**
+  private static final Pattern ILLUSTRATION_PATTERN =
+      Pattern.compile("^\\*\\*\\(Page \\d+:\\s*Illustration\\s*-\\s*(.+)\\)\\*\\*$", Pattern.CASE_INSENSITIVE);
+
+  private final ImageGenerationService imageGenerationService;
+
+  @Autowired
+  public PdfGeneratorService(ImageGenerationService imageGenerationService) {
+    this.imageGenerationService = imageGenerationService;
+  }
 
   public byte[] createPDF(String name, String content, String language) {
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -31,17 +50,16 @@ public class PdfGeneratorService {
       try {
         BaseFont bfRegular = BaseFont.createFont(resolveRegularFontPath(language), BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
         BaseFont bfBold    = BaseFont.createFont(resolveBoldFontPath(language),    BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-        // Indic/CJK scripts have no italic — bold is used as the closest substitute
         titleFont      = new Font(bfBold,    20, Font.NORMAL);
         h1Font         = new Font(bfBold,    18, Font.NORMAL);
         h2Font         = new Font(bfBold,    16, Font.NORMAL);
         h3Font         = new Font(bfBold,    14, Font.NORMAL);
         bodyFont       = new Font(bfRegular, 12, Font.NORMAL);
         boldFont       = new Font(bfBold,    12, Font.NORMAL);
-        italicFont     = new Font(bfBold,    12, Font.NORMAL);  // bold as italic fallback
+        italicFont     = new Font(bfBold,    12, Font.NORMAL);
         boldItalicFont = new Font(bfBold,    12, Font.NORMAL);
       } catch (Exception e) {
-        LOGGER.warn("Unicode font not found for language '{}', falling back to Helvetica. Place font files in src/main/resources/fonts/", language);
+        LOGGER.warn("Unicode font not found for language '{}', falling back to Helvetica.", language);
         titleFont      = new Font(Font.FontFamily.HELVETICA, 20, Font.BOLD);
         h1Font         = new Font(Font.FontFamily.HELVETICA, 18, Font.BOLD);
         h2Font         = new Font(Font.FontFamily.HELVETICA, 16, Font.BOLD);
@@ -52,14 +70,18 @@ public class PdfGeneratorService {
         boldItalicFont = new Font(Font.FontFamily.HELVETICA, 12, Font.BOLDITALIC);
       }
 
-      // Cover title
+      // Cover page title
       Paragraph title = new Paragraph("Personalized Storybook for " + name, titleFont);
       title.setSpacingAfter(6);
       document.add(title);
       document.add(new LineSeparator(1f, 100f, BaseColor.BLACK, Element.ALIGN_CENTER, -2f));
       document.add(Chunk.NEWLINE);
 
-      // Parse and render markdown content line by line
+      // Parse content: split on lines, track page boundaries via "---"
+      // First "---" = end of header/cover; each subsequent "---" = new story page
+      boolean firstHrSeen = false;
+      boolean needNewPage = false;
+
       for (String line : content.split("\n")) {
         String trimmed = line.trim();
 
@@ -68,15 +90,38 @@ public class PdfGeneratorService {
           continue;
         }
 
-        // Horizontal rule: --- or *** or ___
+        // "---" = page boundary marker
         if (trimmed.matches("[-*_]{3,}")) {
-          document.add(Chunk.NEWLINE);
-          document.add(new LineSeparator(0.5f, 100f, BaseColor.GRAY, Element.ALIGN_CENTER, -2f));
-          document.add(Chunk.NEWLINE);
+          if (!firstHrSeen) {
+            // First separator: just marks end of cover section
+            firstHrSeen = true;
+            document.add(new LineSeparator(0.5f, 100f, BaseColor.GRAY, Element.ALIGN_CENTER, -2f));
+            document.add(Chunk.NEWLINE);
+          } else {
+            // Subsequent separators: begin a new story page
+            needNewPage = true;
+          }
           continue;
         }
 
-        // Headings — strip inline markers since heading font is already bold
+        // Check for illustration/image marker
+        String imageDesc = extractImageDescription(trimmed);
+        if (imageDesc != null) {
+          if (needNewPage) {
+            document.newPage();
+            needNewPage = false;
+          }
+          addStorybookImage(document, imageDesc);
+          continue;
+        }
+
+        // Apply pending page break before regular content
+        if (needNewPage) {
+          document.newPage();
+          needNewPage = false;
+        }
+
+        // Headings
         if (trimmed.startsWith("### ")) {
           Paragraph p = new Paragraph(stripInlineMarkdown(trimmed.substring(4)), h3Font);
           p.setSpacingBefore(8);
@@ -108,11 +153,12 @@ public class PdfGeneratorService {
           continue;
         }
 
-        // Normal paragraph with inline bold/italic
+        // Normal paragraph
         Paragraph p = buildStyledParagraph(trimmed, bodyFont, boldFont, italicFont, boldItalicFont);
         p.setSpacingAfter(4);
         document.add(p);
       }
+
     } catch (Exception e) {
       LOGGER.error("Error while creating PDF: ", e);
       throw new RuntimeException("Failed to generate the PDF. Please try again later.");
@@ -124,7 +170,44 @@ public class PdfGeneratorService {
     return outputStream.toByteArray();
   }
 
-  /** Removes inline markdown markers (bold/italic/code) from heading text. */
+  /**
+   * Generates an image for the given description and adds it centered on the current PDF page.
+   * If generation fails, silently skips.
+   */
+  private void addStorybookImage(Document document, String description) {
+    try {
+      byte[] imageBytes = imageGenerationService.generateStorybookImage(description);
+      if (imageBytes == null) return;
+
+      Image img = Image.getInstance(imageBytes);
+      img.setAlignment(Element.ALIGN_CENTER);
+      // Scale to fit page width (minus margins) with a max height of 300pt
+      float maxWidth  = document.getPageSize().getWidth()  - document.leftMargin() - document.rightMargin();
+      float maxHeight = 300f;
+      img.scaleToFit(maxWidth, maxHeight);
+      document.add(img);
+      document.add(Chunk.NEWLINE);
+    } catch (Exception e) {
+      LOGGER.warn("Failed to embed image in PDF: {}", e.getMessage());
+    }
+  }
+
+  /**
+   * Extracts the scene description from a supported image marker line.
+   * Supported formats:
+   *   [IMAGE: description]
+   *   **(Page N: Illustration - description)**
+   */
+  private String extractImageDescription(String line) {
+    Matcher m1 = IMAGE_TAG_PATTERN.matcher(line);
+    if (m1.matches()) return m1.group(1).trim();
+
+    Matcher m2 = ILLUSTRATION_PATTERN.matcher(line);
+    if (m2.matches()) return m2.group(1).trim();
+
+    return null;
+  }
+
   private String stripInlineMarkdown(String text) {
     return text.replaceAll("\\*\\*\\*(.+?)\\*\\*\\*", "$1")
                .replaceAll("\\*\\*(.+?)\\*\\*", "$1")
@@ -133,10 +216,6 @@ public class PdfGeneratorService {
                .replaceAll("`(.+?)`", "$1");
   }
 
-  /**
-   * Builds a Paragraph by scanning for inline markdown markers (***bold-italic***,
-   * **bold**, *italic*, _italic_) and wrapping matched spans in the appropriate Font.
-   */
   private Paragraph buildStyledParagraph(String text, Font normal, Font bold, Font italic, Font boldItalic) {
     Paragraph paragraph = new Paragraph();
     paragraph.setFont(normal);
@@ -144,7 +223,6 @@ public class PdfGeneratorService {
     int i = 0;
 
     while (i < text.length()) {
-      // ***bold-italic***
       if (i + 2 < text.length() && text.startsWith("***", i)) {
         flushBuffer(paragraph, buffer, normal);
         int end = text.indexOf("***", i + 3);
@@ -154,9 +232,7 @@ public class PdfGeneratorService {
         } else {
           buffer.append(text.charAt(i++));
         }
-      }
-      // **bold**
-      else if (i + 1 < text.length() && text.startsWith("**", i)) {
+      } else if (i + 1 < text.length() && text.startsWith("**", i)) {
         flushBuffer(paragraph, buffer, normal);
         int end = text.indexOf("**", i + 2);
         if (end != -1) {
@@ -165,9 +241,7 @@ public class PdfGeneratorService {
         } else {
           buffer.append(text.charAt(i++));
         }
-      }
-      // *italic* or _italic_
-      else if (text.charAt(i) == '*' || text.charAt(i) == '_') {
+      } else if (text.charAt(i) == '*' || text.charAt(i) == '_') {
         char marker = text.charAt(i);
         flushBuffer(paragraph, buffer, normal);
         int end = text.indexOf(marker, i + 1);
@@ -220,7 +294,7 @@ public class PdfGeneratorService {
       case "bengali"                     -> "/fonts/NotoSansBengali-Bold.ttf";
       case "gujarati"                    -> "/fonts/NotoSansGujarati-Bold.ttf";
       case "punjabi"                     -> "/fonts/NotoSansGurmukhi-Bold.ttf";
-      case "arabic", "urdu"              -> "/fonts/NotoSansArabic-Bold.ttf";
+      case "arabic", "urdu"             -> "/fonts/NotoSansArabic-Bold.ttf";
       case "chinese"                     -> "/fonts/NotoSansSC-Bold.ttf";
       case "japanese"                    -> "/fonts/NotoSansJP-Bold.ttf";
       default                            -> "/fonts/NotoSans-Bold.ttf";

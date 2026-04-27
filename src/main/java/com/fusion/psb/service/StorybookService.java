@@ -56,10 +56,14 @@ public class StorybookService {
     }
 
     // No cache hit — call AI
-    String sysPromp = "You are a story creator who creates story as per the inputs given by user. Generate story for two pages. Short ones. "
-        + "Use low level vocabulary so person in india can understand. Add images in form of text, so in next iteration we can use it to generate image."
-        + "Generate content based on the age. Respond ONLY with the story content. Do not include any introductory or concluding remarks."
-        + "Generate the entire story in " + language + " language.";
+    String sysPromp = "You are a story creator who creates personalized storybooks for children. "
+        + "Generate a story across 3 to 4 pages. Keep each page short and use simple vocabulary suitable for the child's age. "
+        + "One page will be divided between text and image, 50% text and 50% image"
+        + "For EACH story page you MUST include an image description on its own line using EXACTLY this format: [IMAGE: <detailed visual scene description>]. "
+        + "Image descriptions MUST always be written in English (even if the story language is different), because they are used to generate illustrations. "
+        + "Separate story pages with '---'. "
+        + "Respond ONLY with the story content. Do not include any introductory or concluding remarks. "
+        + "Generate the story text in " + language + " language.";
 
     String userPrompt = String.format(
         "Create a personalized storybook for a %d-year-old %s named %s with body tone %s. " +
